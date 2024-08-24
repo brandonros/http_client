@@ -1,9 +1,34 @@
-use std::str::FromStr;
+use std::{net::SocketAddr, str::FromStr};
 
-use async_std::net::TcpStream;
+use async_io::Async;
 use async_tls::TlsConnector;
-use futures::{io::BufReader, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use http::{HeaderMap, HeaderName, HeaderValue, Request, Response, StatusCode, Version};
+
+#[cfg(feature = "futures")]
+mod futures_imports {
+    pub use futures::io::BufReader;
+    pub use futures::io::AsyncBufReadExt;
+    pub use futures::io::AsyncRead;
+    pub use futures::io::AsyncReadExt;
+    pub use futures::io::AsyncWrite;
+    pub use futures::io::AsyncWriteExt;
+}
+
+#[cfg(feature = "futures-lite")]
+mod futures_lite_imports {
+    pub use futures_lite::io::BufReader;
+    pub use futures_lite::io::AsyncBufReadExt;
+    pub use futures_lite::io::AsyncRead;
+    pub use futures_lite::io::AsyncReadExt;
+    pub use futures_lite::io::AsyncWrite;
+    pub use futures_lite::io::AsyncWriteExt;
+}
+
+#[cfg(feature = "futures")]
+use futures_imports::*;
+
+#[cfg(feature = "futures-lite")]
+use futures_lite_imports::*;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -107,7 +132,8 @@ where
 
     // open tcp socket
     let (scheme, host, port) = extract_host_from_request(&request)?;
-    let stream = TcpStream::connect(format!("{host}:{port}")).await?;
+    let addr: SocketAddr = format!("{host}:{port}").parse()?;
+    let stream = Async::<std::net::TcpStream>::connect(addr).await?;
 
     // optionally add tls based on scheme
     let mut stream: Box<dyn AsyncConn> = if scheme == "https" {
