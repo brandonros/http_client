@@ -1,16 +1,15 @@
 use std::str::FromStr;
 
-use futures::{io::BufReader, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
-use http::{HeaderMap, HeaderValue, Request, Response};
+use async_std::net::TcpStream;
+use async_tls::TlsConnector;
+use futures::{io::BufReader, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use http::{HeaderMap, HeaderName, HeaderValue, Request, Response, StatusCode, Version};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-trait AsyncConn:
-    futures::AsyncRead + futures::AsyncWrite + Send + Sync + Unpin
-{
-}
+trait AsyncConn: AsyncRead + AsyncWrite + Send + Sync + Unpin {}
 
-impl<T: futures::AsyncRead + futures::AsyncWrite + Send + Sync + Unpin> AsyncConn for T {}
+impl<T: AsyncRead + AsyncWrite + Send + Sync + Unpin> AsyncConn for T {}
 
 fn extract_host_from_request<Req>(req: &Request<Req>) -> Result<(String, String, u16)> {
     let uri = req.uri();
@@ -45,10 +44,10 @@ fn serialize_http_request<Req>(req: &Request<Req>) -> Result<String> {
     };
 
     let version = match req.version() {
-        http::Version::HTTP_10 => "HTTP/1.0",
-        http::Version::HTTP_11 => "HTTP/1.1",
-        http::Version::HTTP_2 => "HTTP/2.0",
-        http::Version::HTTP_3 => "HTTP/3.0",
+        Version::HTTP_10 => "HTTP/1.0",
+        Version::HTTP_11 => "HTTP/1.1",
+        Version::HTTP_2 => "HTTP/2.0",
+        Version::HTTP_3 => "HTTP/3.0",
         _ => "HTTP/1.1", // Default to HTTP/1.1 if uncertain
     };
 
@@ -87,8 +86,8 @@ where
             let value = value
                 .trim_end_matches(|c: char| c == '\r' || c == '\n')
                 .to_string();
-            let header_name = http::HeaderName::from_str(&key)?;
-            let header_value = http::HeaderValue::from_str(&value)?;
+            let header_name = HeaderName::from_str(&key)?;
+            let header_value = HeaderValue::from_str(&value)?;
             headers.insert(header_name, header_value);
         } else {
             log::warn!("failed to parse header line {line}");
@@ -108,11 +107,11 @@ where
 
     // open tcp socket
     let (scheme, host, port) = extract_host_from_request(&request)?;
-    let stream = async_std::net::TcpStream::connect(format!("{host}:{port}")).await?;
+    let stream = TcpStream::connect(format!("{host}:{port}")).await?;
 
     // optionally add tls based on scheme
     let mut stream: Box<dyn AsyncConn> = if scheme == "https" {
-        let tls_connector = async_tls::TlsConnector::new();
+        let tls_connector = TlsConnector::new();
         Box::new(tls_connector.connect(&host, stream).await?)
     } else {
         Box::new(stream)
@@ -142,12 +141,12 @@ where
         return Err("Failed to parse response status line".into());
     }
     let response_version = match response_status_line_parts[0] {
-        "HTTP/1.0" => http::Version::HTTP_10,
-        "HTTP/1.1" => http::Version::HTTP_11,
-        "HTTP/2.0" => http::Version::HTTP_2,
+        "HTTP/1.0" => Version::HTTP_10,
+        "HTTP/1.1" => Version::HTTP_11,
+        "HTTP/2.0" => Version::HTTP_2,
         _ => return Err("Unsupported HTTP version".into()),
     };
-    let response_status = http::StatusCode::from_u16(response_status_line_parts[1].parse()?)?;
+    let response_status = StatusCode::from_u16(response_status_line_parts[1].parse()?)?;
 
     // read response headers
     let response_headers = read_response_headers(&mut reader).await?;
@@ -171,11 +170,12 @@ where
     };
 
     // Decompress if necessary
-    let decompressed_body = if let Some(_content_encoding) = response_headers.get("content-encoding") {
-        todo!()
-    } else {
-        response_body
-    };
+    let decompressed_body =
+        if let Some(_content_encoding) = response_headers.get("content-encoding") {
+            todo!()
+        } else {
+            response_body
+        };
 
     // convert response body vec<u8> to string
     let response_body_str = String::from_utf8(decompressed_body)?;
