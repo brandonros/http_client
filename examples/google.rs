@@ -1,6 +1,6 @@
 use futures_lite::future;
-use http_client::send_http_request;
 use http::{Request, Response, Uri};
+use http_client::HttpClient;
 
 fn main() {
     future::block_on(async {
@@ -16,7 +16,8 @@ fn main() {
             .body(())
             .expect("Failed to build request");
 
-        let response: Response<String> = send_http_request(&request).await.expect("Failed to send request");
+        let response: Response<String> = HttpClient::send(&request).await.expect("request failed");
+        println!("Response: {:?}", response);
 
         println!("{response:?}");
     })

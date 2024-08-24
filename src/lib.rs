@@ -30,207 +30,215 @@ trait AsyncConn: AsyncRead + AsyncWrite + Send + Sync + Unpin {}
 
 impl<T: AsyncRead + AsyncWrite + Send + Sync + Unpin> AsyncConn for T {}
 
-fn extract_host_from_request<Req>(req: &Request<Req>) -> Result<(String, String, u16)> {
-    let uri = req.uri();
-    let authority = uri.authority().ok_or("No authority found in URI")?;
-    let scheme = uri.scheme_str().ok_or("No scheme found in URI")?;
+pub struct HttpClient;
 
-    // Extract host and optional port from the authority
-    let host = authority.host();
-    let port = authority.port_u16().unwrap_or_else(|| match scheme {
-        "http" => 80,   // Default port for HTTP
-        "https" => 443, // Default port for HTTPS
-        _ => 0,  // Indicate unknown scheme
-    });
+impl HttpClient {
+    // Public method to send an HTTP request and return the HTTP response
+    pub async fn send<Req, Res>(request: &Request<Req>) -> Result<Response<Res>>
+    where
+        Req: std::fmt::Debug + PartialEq<()>,
+        Res: std::fmt::Debug + Sized + std::convert::From<String>,
+    {
+        log::debug!("request = {request:?}");
 
-    if port == 0 {
-        return Err("Unsupported URL scheme, only HTTP and HTTPS are supported".into());
-    }
+        // Extract the scheme, host, and port from the request
+        let (scheme, host, port) = Self::extract_host_from_request(request)?;
+        let addr = format!("{host}:{port}").to_socket_addrs()?.next().ok_or("Failed to resolve host")?;
+        let stream = Async::<std::net::TcpStream>::connect(addr).await?;
 
-    Ok((scheme.to_string(), host.to_string(), port))
-}
-
-fn serialize_http_request<Req>(req: &Request<Req>) -> Result<String> {
-    let method = req.method();
-    let uri = req.uri();
-
-    // Extract only the path and query from the URI
-    let path_and_query = uri.path_and_query().map_or("/", |pq| pq.as_str());
-
-    let version = match req.version() {
-        Version::HTTP_10 => "HTTP/1.0",
-        Version::HTTP_11 => "HTTP/1.1",
-        Version::HTTP_2 => "HTTP/2.0",
-        Version::HTTP_3 => "HTTP/3.0",
-        _ => "HTTP/1.1", // Default to HTTP/1.1 if uncertain
-    };
-
-    let mut request_line = format!("{method} {path_and_query} {version}\r\n");
-
-    // Add headers
-    for (name, value) in req.headers() {
-        request_line.push_str(&format!("{}: {}\r\n", name.as_str(), value.to_str()?));
-    }
-
-    // Add an extra line to indicate the end of the header section
-    request_line.push_str("\r\n");
-
-    Ok(request_line)
-}
-
-async fn read_response_headers<S>(reader: &mut BufReader<S>) -> Result<HeaderMap<HeaderValue>>
-where
-    S: AsyncRead + Unpin,
-{
-    let mut headers = HeaderMap::new();
-    let mut line = String::new();
-
-    // Read lines until an empty line is reached (headers end)
-    while reader.read_line(&mut line).await? != 0 && line != "\r\n" {
-        // Parse the header line into a key-value pair and insert it into the map
-        if let Some((key, value)) = line.split_once(": ") {
-            let key = key.to_lowercase();
-            let value = value.trim_end_matches(|c: char| c == '\r' || c == '\n');
-            let header_name = HeaderName::from_str(&key)?;
-            let header_value = HeaderValue::from_str(value)?;
-            headers.insert(header_name, header_value);
+        // Optionally add TLS based on the scheme
+        let mut stream: Box<dyn AsyncConn> = if scheme == "https" {
+            let tls_connector = TlsConnector::new();
+            Box::new(tls_connector.connect(&host, stream).await?)
         } else {
-            log::warn!("Failed to parse header line: {line}");
-        }
-        line.clear(); // Clear the buffer for the next line
-    }
+            Box::new(stream)
+        };
 
-    Ok(headers)
-}
+        // Write the HTTP request to the stream
+        let serialized_request = Self::serialize_http_request(request)?;
+        stream.write_all(serialized_request.as_bytes()).await?;
+        stream.flush().await?;
 
-async fn read_chunked_body<S>(reader: &mut BufReader<S>) -> Result<Vec<u8>>
-where
-    S: AsyncRead + Unpin,
-{
-    let mut body = Vec::new();
-    let mut chunk_size_line = String::new();
-
-    loop {
-        // Read the chunk size line
-        reader.read_line(&mut chunk_size_line).await?;
-        let chunk_size = usize::from_str_radix(chunk_size_line.trim(), 16)?;
-
-        // Break on a zero-size chunk (end of the body)
-        if chunk_size == 0 {
-            break;
+        // Write request body if there is one
+        let request_body = request.body();
+        if *request_body != () {
+            todo!() // Handle non-empty request body
         }
 
-        // Read the chunk data
-        let mut chunk = vec![0; chunk_size];
-        reader.read_exact(&mut chunk).await?;
-        body.extend_from_slice(&chunk);
+        // Read and parse the response
+        let mut reader = BufReader::new(stream);
+        let response_status_line = Self::read_response_status_line(&mut reader).await?;
+        let (response_version, response_status) = Self::parse_response_status_line(&response_status_line)?;
+        let response_headers = Self::read_response_headers(&mut reader).await?;
+        log::debug!("response_headers = {response_headers:?}");
+        let response_body = Self::read_response_body(&mut reader, &response_headers).await?;
 
-        // Read the trailing CRLF after the chunk
-        let mut crlf = [0; 2];
-        reader.read_exact(&mut crlf).await?;
-        if &crlf != b"\r\n" {
-            return Err("Invalid chunked encoding: missing CRLF".into());
+        // Convert the response body Vec<u8> to a string
+        let response_body_str = String::from_utf8(response_body)?;
+
+        // Convert to HTTP crate response
+        let mut response: Response<Res> = Response::builder()
+            .status(response_status)
+            .version(response_version)
+            .body(response_body_str.into())?;
+
+        // Copy response headers to response
+        *response.headers_mut() = response_headers;
+
+        log::debug!("response = {response:?}");
+
+        Ok(response)
+    }
+
+    // Extracts the scheme, host, and port from the request URI
+    fn extract_host_from_request<Req>(req: &Request<Req>) -> Result<(String, String, u16)> {
+        let uri = req.uri();
+        let authority = uri.authority().ok_or("No authority found in URI")?;
+        let scheme = uri.scheme_str().ok_or("No scheme found in URI")?;
+
+        let host = authority.host();
+        let port = authority.port_u16().unwrap_or_else(|| match scheme {
+            "http" => 80,
+            "https" => 443,
+            _ => return 0,
+        });
+
+        if port == 0 {
+            return Err("Unsupported URL scheme, only HTTP and HTTPS are supported".into());
         }
-        chunk_size_line.clear();
+
+        Ok((scheme.to_string(), host.to_string(), port))
     }
 
-    Ok(body)
-}
+    // Serializes the HTTP request into a string format that can be sent over the network
+    fn serialize_http_request<Req>(req: &Request<Req>) -> Result<String> {
+        let method = req.method();
+        let uri = req.uri();
 
-pub async fn send_http_request<Req, Res>(request: &Request<Req>) -> Result<Response<Res>>
-where
-    Req: std::fmt::Debug + PartialEq<()>,
-    Res: std::fmt::Debug + Sized + std::convert::From<String>,
-{
-    log::debug!("request = {request:?}");
+        let path_and_query = uri.path_and_query().map_or("/", |pq| pq.as_str());
 
-    // Open a TCP socket to the host
-    let (scheme, host, port) = extract_host_from_request(request)?;
-    let addr = format!("{host}:{port}").to_socket_addrs()?.next().ok_or("Failed to resolve host")?;
-    let stream = Async::<std::net::TcpStream>::connect(addr).await?;
+        let version = match req.version() {
+            Version::HTTP_10 => "HTTP/1.0",
+            Version::HTTP_11 => "HTTP/1.1",
+            Version::HTTP_2 => "HTTP/2.0",
+            Version::HTTP_3 => "HTTP/3.0",
+            _ => "HTTP/1.1",
+        };
 
-    // Optionally add TLS based on the scheme
-    let mut stream: Box<dyn AsyncConn> = if scheme == "https" {
-        let tls_connector = TlsConnector::new();
-        Box::new(tls_connector.connect(&host, stream).await?)
-    } else {
-        Box::new(stream)
-    };
+        let mut request_line = format!("{method} {path_and_query} {version}\r\n");
 
-    // Write the HTTP request to the stream
-    let serialized_request = serialize_http_request(request)?;
-    stream.write_all(serialized_request.as_bytes()).await?;
-    stream.flush().await?;
+        for (name, value) in req.headers() {
+            request_line.push_str(&format!("{}: {}\r\n", name.as_str(), value.to_str()?));
+        }
 
-    // Write request body if there is one
-    let request_body = request.body();
-    if *request_body != () {
-        todo!() // Handle non-empty request body
+        request_line.push_str("\r\n");
+
+        Ok(request_line)
     }
 
-    // Read the response status line
-    let mut reader = BufReader::new(stream);
-    let mut response_status_line = String::new();
-    reader.read_line(&mut response_status_line).await?;
-
-    // Parse the response status line
-    let response_status_line_parts: Vec<&str> = response_status_line.split_whitespace().collect();
-    if response_status_line_parts.len() < 2 {
-        return Err("Failed to parse response status line".into());
+    // Reads the response status line from the stream
+    async fn read_response_status_line<S>(reader: &mut BufReader<S>) -> Result<String>
+    where
+        S: AsyncRead + Unpin,
+    {
+        let mut response_status_line = String::new();
+        reader.read_line(&mut response_status_line).await?;
+        Ok(response_status_line)
     }
-    let response_version = match response_status_line_parts[0] {
-        "HTTP/1.0" => Version::HTTP_10,
-        "HTTP/1.1" => Version::HTTP_11,
-        "HTTP/2.0" => Version::HTTP_2,
-        _ => return Err("Unsupported HTTP version".into()),
-    };
-    let response_status = StatusCode::from_u16(response_status_line_parts[1].parse()?)?;
 
-    // Read the response headers
-    let response_headers = read_response_headers(&mut reader).await?;
-    log::debug!("response_headers = {response_headers:?}");
+    // Parses the response status line into a version and status code
+    fn parse_response_status_line(response_status_line: &str) -> Result<(Version, StatusCode)> {
+        let response_status_line_parts: Vec<&str> = response_status_line.split_whitespace().collect();
+        if response_status_line_parts.len() < 2 {
+            return Err("Failed to parse response status line".into());
+        }
 
-    // Read the response body
-    let response_body = if let Some(content_length_value) = response_headers.get("content-length") {
-        // Read the response body based on the Content-Length
-        let content_length = content_length_value.to_str()?.parse::<usize>()?;
-        let mut response_body = vec![0u8; content_length];
-        reader.read_exact(&mut response_body).await?;
-        response_body
-    } else if let Some(transfer_encoding) = response_headers.get("transfer-encoding") {
-        if transfer_encoding == "chunked" {
-            read_chunked_body(&mut reader).await?
+        let response_version = match response_status_line_parts[0] {
+            "HTTP/1.0" => Version::HTTP_10,
+            "HTTP/1.1" => Version::HTTP_11,
+            "HTTP/2.0" => Version::HTTP_2,
+            _ => return Err("Unsupported HTTP version".into()),
+        };
+
+        let response_status = StatusCode::from_u16(response_status_line_parts[1].parse()?)?;
+        Ok((response_version, response_status))
+    }
+
+    // Reads the response headers from the provided BufReader
+    async fn read_response_headers<S>(reader: &mut BufReader<S>) -> Result<HeaderMap<HeaderValue>>
+    where
+        S: AsyncRead + Unpin,
+    {
+        let mut headers = HeaderMap::new();
+        let mut line = String::new();
+
+        while reader.read_line(&mut line).await? != 0 && line != "\r\n" {
+            if let Some((key, value)) = line.split_once(": ") {
+                let key = key.to_lowercase();
+                let value = value.trim_end_matches(|c: char| c == '\r' || c == '\n');
+                let header_name = HeaderName::from_str(&key)?;
+                let header_value = HeaderValue::from_str(value)?;
+                headers.insert(header_name, header_value);
+            } else {
+                log::warn!("Failed to parse header line: {line}");
+            }
+            line.clear();
+        }
+
+        Ok(headers)
+    }
+
+    // Reads a chunked HTTP body from the provided BufReader
+    async fn read_chunked_body<S>(reader: &mut BufReader<S>) -> Result<Vec<u8>>
+    where
+        S: AsyncRead + Unpin,
+    {
+        let mut body = Vec::new();
+        let mut chunk_size_line = String::new();
+
+        loop {
+            reader.read_line(&mut chunk_size_line).await?;
+            let chunk_size = usize::from_str_radix(chunk_size_line.trim(), 16)?;
+
+            if chunk_size == 0 {
+                break;
+            }
+
+            let mut chunk = vec![0; chunk_size];
+            reader.read_exact(&mut chunk).await?;
+            body.extend_from_slice(&chunk);
+
+            let mut crlf = [0; 2];
+            reader.read_exact(&mut crlf).await?;
+            if &crlf != b"\r\n" {
+                return Err("Invalid chunked encoding: missing CRLF".into());
+            }
+            chunk_size_line.clear();
+        }
+
+        Ok(body)
+    }
+
+    // Reads the response body based on headers
+    async fn read_response_body<S>(reader: &mut BufReader<S>, headers: &HeaderMap<HeaderValue>) -> Result<Vec<u8>>
+    where
+        S: AsyncRead + Unpin,
+    {
+        if let Some(content_length_value) = headers.get("content-length") {
+            let content_length = content_length_value.to_str()?.parse::<usize>()?;
+            let mut response_body = vec![0u8; content_length];
+            reader.read_exact(&mut response_body).await?;
+            Ok(response_body)
+        } else if let Some(transfer_encoding) = headers.get("transfer-encoding") {
+            if transfer_encoding == "chunked" {
+                Self::read_chunked_body(reader).await
+            } else {
+                todo!() // Handle other transfer encodings if needed
+            }
         } else {
-            todo!() // Handle other transfer encodings if needed
+            let mut response_body = Vec::with_capacity(8 * 1024 * 1024);
+            let num_bytes_read = reader.read_to_end(&mut response_body).await?;
+            Ok(response_body[0..num_bytes_read].to_vec())
         }
-    } else {
-        // Read until end on HTTP/1.0 connection close
-        let mut response_body = Vec::with_capacity(8 * 1024 * 1024);
-        let num_bytes_read = reader.read_to_end(&mut response_body).await?;
-        response_body[0..num_bytes_read].to_vec()
-    };
-
-    // Decompress if necessary
-    let decompressed_body = if response_headers.get("content-encoding").is_some() {
-        todo!() // Handle decompression if needed
-    } else {
-        response_body
-    };
-
-    // Convert the response body Vec<u8> to a string
-    let response_body_str = String::from_utf8(decompressed_body)?;
-
-    // Convert to HTTP crate response
-    let mut response: Response<Res> = Response::builder()
-        .status(response_status)
-        .version(response_version)
-        .body(response_body_str.into())?;
-
-    // Copy response headers to response
-    *response.headers_mut() = response_headers;
-
-    // log
-    log::debug!("response = {response:?}");
-
-    Ok(response)
+    }
 }
