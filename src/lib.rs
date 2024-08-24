@@ -1,4 +1,5 @@
-use std::{net::SocketAddr, str::FromStr};
+use std::net::ToSocketAddrs;
+use std::str::FromStr;
 
 use async_io::Async;
 use async_tls::TlsConnector;
@@ -122,6 +123,40 @@ where
     Ok(headers)
 }
 
+async fn read_chunked_body<S>(reader: &mut BufReader<S>) -> Result<Vec<u8>>
+where
+    S: AsyncReadExt + Unpin,
+{
+    let mut body = Vec::new();
+    let mut chunk_size_line = String::new();
+
+    loop {
+        // Read the chunk size line
+        chunk_size_line.clear();
+        reader.read_line(&mut chunk_size_line).await?;
+        let chunk_size = usize::from_str_radix(chunk_size_line.trim(), 16)?;
+
+        // Break on a zero-size chunk (end of the body)
+        if chunk_size == 0 {
+            break;
+        }
+
+        // Read the chunk data
+        let mut chunk = vec![0; chunk_size];
+        reader.read_exact(&mut chunk).await?;
+        body.extend_from_slice(&chunk);
+
+        // Read the trailing CRLF after the chunk
+        let mut crlf = [0; 2];
+        reader.read_exact(&mut crlf).await?;
+        if &crlf != b"\r\n" {
+            return Err("Invalid chunked encoding: missing CRLF".into());
+        }
+    }
+
+    Ok(body)
+}
+
 pub async fn send_http_request<Req, Res>(request: &Request<Req>) -> Result<Response<Res>>
 where
     Req: std::fmt::Debug + PartialEq<()>,
@@ -132,7 +167,7 @@ where
 
     // open tcp socket
     let (scheme, host, port) = extract_host_from_request(&request)?;
-    let addr: SocketAddr = format!("{host}:{port}").parse()?;
+    let addr = format!("{host}:{port}").to_socket_addrs()?.nth(0).expect("failed to parse host");
     let stream = Async::<std::net::TcpStream>::connect(addr).await?;
 
     // optionally add tls based on scheme
@@ -186,8 +221,12 @@ where
         let mut response_body = vec![0u8; content_length];
         reader.read_exact(&mut response_body).await?;
         response_body
-    } else if let Some(_transfer_encoding) = response_headers.get("transfer-encoding") {
-        todo!()
+    } else if let Some(transfer_encoding) = response_headers.get("transfer-encoding") {
+        if transfer_encoding == "chunked" {
+            read_chunked_body(&mut reader).await?
+        } else {
+            todo!()
+        }
     } else {
         // read until end on HTTP/1.0 connection close?
         let mut response_body = Vec::with_capacity(1024 * 1024 * 8);
