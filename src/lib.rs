@@ -1,5 +1,7 @@
 #[cfg(not(any(feature = "futures", feature = "futures-lite")))]
-compile_error!("You must enable either the `futures` or `futures-lite` feature to build this crate.");
+compile_error!(
+    "You must enable either the `futures` or `futures-lite` feature to build this crate."
+);
 
 use std::net::ToSocketAddrs;
 use std::str::FromStr;
@@ -9,20 +11,14 @@ use async_tls::TlsConnector;
 use http::{HeaderMap, HeaderName, HeaderValue, Request, Response, StatusCode, Version};
 
 #[cfg(feature = "futures")]
-mod futures_imports {
-    pub use futures::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
-}
+pub use futures::io::{
+    AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader,
+};
 
 #[cfg(feature = "futures-lite")]
-mod futures_lite_imports {
-    pub use futures_lite::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
-}
-
-#[cfg(feature = "futures")]
-use futures_imports::*;
-
-#[cfg(feature = "futures-lite")]
-use futures_lite_imports::*;
+pub use futures_lite::io::{
+    AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader,
+};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -43,7 +39,10 @@ impl HttpClient {
 
         // Extract the scheme, host, and port from the request
         let (scheme, host, port) = Self::extract_host_from_request(request)?;
-        let addr = format!("{host}:{port}").to_socket_addrs()?.next().ok_or("Failed to resolve host")?;
+        let addr = format!("{host}:{port}")
+            .to_socket_addrs()?
+            .next()
+            .ok_or("Failed to resolve host")?;
         let stream = Async::<std::net::TcpStream>::connect(addr).await?;
 
         // Optionally add TLS based on the scheme
@@ -68,7 +67,8 @@ impl HttpClient {
         // Read and parse the response
         let mut reader = BufReader::new(stream);
         let response_status_line = Self::read_response_status_line(&mut reader).await?;
-        let (response_version, response_status) = Self::parse_response_status_line(&response_status_line)?;
+        let (response_version, response_status) =
+            Self::parse_response_status_line(&response_status_line)?;
         let response_headers = Self::read_response_headers(&mut reader).await?;
         log::debug!("response_headers = {response_headers:?}");
         let response_body = Self::read_response_body(&mut reader, &response_headers).await?;
@@ -148,7 +148,8 @@ impl HttpClient {
 
     // Parses the response status line into a version and status code
     fn parse_response_status_line(response_status_line: &str) -> Result<(Version, StatusCode)> {
-        let response_status_line_parts: Vec<&str> = response_status_line.split_whitespace().collect();
+        let response_status_line_parts: Vec<&str> =
+            response_status_line.split_whitespace().collect();
         if response_status_line_parts.len() < 2 {
             return Err("Failed to parse response status line".into());
         }
@@ -220,7 +221,10 @@ impl HttpClient {
     }
 
     // Reads the response body based on headers
-    async fn read_response_body<S>(reader: &mut BufReader<S>, headers: &HeaderMap<HeaderValue>) -> Result<Vec<u8>>
+    async fn read_response_body<S>(
+        reader: &mut BufReader<S>,
+        headers: &HeaderMap<HeaderValue>,
+    ) -> Result<Vec<u8>>
     where
         S: AsyncRead + Unpin,
     {
