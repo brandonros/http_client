@@ -43,7 +43,7 @@ impl HttpClient {
         let stream = Async::<std::net::TcpStream>::connect(addr).await?;
 
         // Optionally add TLS based on the scheme
-        let mut stream: Box<dyn AsyncConn> = if scheme == "https" {
+        let mut stream: Box<dyn AsyncConn> = if scheme == "https" || scheme == "wss" {
             let tls_connector = TlsConnector::new();
             Box::new(tls_connector.connect(&host, stream).await?)
         } else {
@@ -64,11 +64,13 @@ impl HttpClient {
         // Read and parse the response
         let mut reader = BufReader::new(stream);
         let response_status_line = Self::read_response_status_line(&mut reader).await?;
+        log::debug!("response_status_line = {response_status_line}");
         let (response_version, response_status) =
             Self::parse_response_status_line(&response_status_line)?;
         let response_headers = Self::read_response_headers(&mut reader).await?;
         log::debug!("response_headers = {response_headers:?}");
         let response_body = Self::read_response_body(&mut reader, &response_headers).await?;
+        log::debug!("response_body = {response_body:02x?}");
 
         // Convert the response body Vec<u8> to a string
         let response_body_str = String::from_utf8(response_body)?;
@@ -82,8 +84,10 @@ impl HttpClient {
         // Copy response headers to response
         *response.headers_mut() = response_headers;
 
+        // log
         log::debug!("response = {response:?}");
 
+        // return
         Ok(response)
     }
 
@@ -97,11 +101,13 @@ impl HttpClient {
         let port = authority.port_u16().unwrap_or_else(|| match scheme {
             "http" => 80,
             "https" => 443,
+            "ws" => 80,
+            "wss" => 443,
             _ => return 0,
         });
 
         if port == 0 {
-            return Err("Unsupported URL scheme, only HTTP and HTTPS are supported".into());
+            return Err("Unsupported URL scheme".into());
         }
 
         Ok((scheme.to_string(), host.to_string(), port))
@@ -235,6 +241,12 @@ impl HttpClient {
                 Self::read_chunked_body(reader).await
             } else {
                 todo!() // Handle other transfer encodings if needed
+            }
+        } else if let Some(connection) = headers.get("connection") {
+            if connection == "upgrade" {
+                Ok(vec![]) // assume empty response body on websocket upgrade
+            } else {
+                todo!()
             }
         } else {
             let mut response_body = Vec::with_capacity(8 * 1024 * 1024);
