@@ -1,5 +1,5 @@
 use futures_lite::future;
-use http::{Request, Response, Uri};
+use http::{Request, Uri};
 use http_client::HttpClient;
 
 fn main() {
@@ -25,7 +25,8 @@ fn main() {
             .expect("Failed to build request");
 
         // Get the response
-        let response: Response<String> = HttpClient::send(&request).await.expect("request failed");
+        let mut stream = HttpClient::connect(&request).await.expect("connect failed");
+        let response = HttpClient::send::<(), String>(&mut stream, &request).await.expect("request failed");
         log::info!("response = {response:?}");
     })
 }

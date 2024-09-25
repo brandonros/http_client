@@ -19,18 +19,16 @@ use futures_provider::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite,
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-trait AsyncConn: AsyncRead + AsyncWrite + Send + Sync + Unpin {}
+pub trait AsyncConn: AsyncRead + AsyncWrite + Send + Sync + Unpin {}
 
 impl<T: AsyncRead + AsyncWrite + Send + Sync + Unpin> AsyncConn for T {}
 
 pub struct HttpClient;
 
 impl HttpClient {
-    // Public method to send an HTTP request and return the HTTP response
-    pub async fn send<Req, Res>(request: &Request<Req>) -> Result<Response<Res>>
+    pub async fn connect<Req>(request: &Request<Req>) -> Result<Box<dyn AsyncConn>>
     where
-        Req: std::fmt::Debug + PartialEq<()>,
-        Res: std::fmt::Debug + Sized + std::convert::From<String>,
+        Req: std::fmt::Debug + PartialEq<()> 
     {
         log::debug!("request = {request:?}");
 
@@ -43,13 +41,22 @@ impl HttpClient {
         let stream = Async::<std::net::TcpStream>::connect(addr).await?;
 
         // Optionally add TLS based on the scheme
-        let mut stream: Box<dyn AsyncConn> = if scheme == "https" || scheme == "wss" {
+        let stream: Box<dyn AsyncConn> = if scheme == "https" || scheme == "wss" {
             let tls_connector = TlsConnector::new();
             Box::new(tls_connector.connect(&host, stream).await?)
         } else {
             Box::new(stream)
         };
 
+        Ok(stream)
+    }
+
+    // Public method to send an HTTP request and return the HTTP response
+    pub async fn send<Req, Res>(stream: &mut Box<dyn AsyncConn>, request: &Request<Req>) -> Result<Response<Res>>
+    where
+        Req: std::fmt::Debug + PartialEq<()>,
+        Res: std::fmt::Debug + Sized + std::convert::From<String>,
+    {
         // Write the HTTP request to the stream
         let serialized_request = Self::serialize_http_request(request)?;
         stream.write_all(serialized_request.as_bytes()).await?;
@@ -65,8 +72,7 @@ impl HttpClient {
         let mut reader = BufReader::new(stream);
         let response_status_line = Self::read_response_status_line(&mut reader).await?;
         log::debug!("response_status_line = {response_status_line}");
-        let (response_version, response_status) =
-            Self::parse_response_status_line(&response_status_line)?;
+        let (response_version, response_status) = Self::parse_response_status_line(&response_status_line)?;
         let response_headers = Self::read_response_headers(&mut reader).await?;
         log::debug!("response_headers = {response_headers:?}");
         let response_body = Self::read_response_body(&mut reader, &response_headers).await?;
