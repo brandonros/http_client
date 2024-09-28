@@ -59,6 +59,7 @@ impl HttpClient {
     {
         // Write the HTTP request to the stream
         let serialized_request = Self::serialize_http_request(request)?;
+        log::debug!("serialized_request = {serialized_request}");
         stream.write_all(serialized_request.as_bytes()).await?;
         stream.flush().await?;
 
@@ -249,7 +250,7 @@ impl HttpClient {
                 todo!() // Handle other transfer encodings if needed
             }
         } else if let Some(connection) = headers.get("connection") {
-            if connection == "upgrade" {
+            if connection == "upgrade" || connection == "Upgrade" {
                 Ok(vec![]) // assume empty response body on websocket upgrade
             } else {
                 todo!()
