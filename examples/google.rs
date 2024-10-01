@@ -1,7 +1,6 @@
 use futures_lite::future;
 use http::{Request, Uri};
 use http_client::HttpClient;
-
 fn main() {
     future::block_on(async {
         // init logging

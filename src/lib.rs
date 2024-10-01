@@ -1,21 +1,10 @@
-#[cfg(not(any(feature = "futures", feature = "futures-lite")))]
-compile_error!(
-    "You must enable either the `futures` or `futures-lite` feature to build this crate."
-);
-
-#[cfg(feature = "futures")]
-use futures as futures_provider;
-
-#[cfg(feature = "futures-lite")]
-use futures_lite as futures_provider;
-
 use std::net::ToSocketAddrs;
 use std::str::FromStr;
 
 use async_io::Async;
 use async_tls::TlsConnector;
 use http::{HeaderMap, HeaderName, HeaderValue, Request, Response, StatusCode, Version};
-use futures_provider::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
+use futures_lite::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
