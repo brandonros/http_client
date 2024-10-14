@@ -6,16 +6,14 @@ use async_tls::TlsConnector;
 use http::{HeaderMap, HeaderName, HeaderValue, Request, Response, StatusCode, Version};
 use futures_lite::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+pub trait AsyncConnection: AsyncRead + AsyncWrite + Send + Sync + Unpin {}
 
-pub trait AsyncConn: AsyncRead + AsyncWrite + Send + Sync + Unpin {}
-
-impl<T: AsyncRead + AsyncWrite + Send + Sync + Unpin> AsyncConn for T {}
+impl<T: AsyncRead + AsyncWrite + Send + Sync + Unpin> AsyncConnection for T {}
 
 pub struct HttpClient;
 
 impl HttpClient {
-    pub async fn connect<Req>(request: &Request<Req>) -> Result<Box<dyn AsyncConn>>
+    pub async fn connect<Req>(request: &Request<Req>) -> anyhow::Result<Box<dyn AsyncConnection>>
     where
         Req: std::fmt::Debug + PartialEq<()> 
     {
@@ -26,11 +24,11 @@ impl HttpClient {
         let addr = format!("{host}:{port}")
             .to_socket_addrs()?
             .next()
-            .ok_or("Failed to resolve host")?;
+            .ok_or(anyhow::anyhow!("Failed to resolve host"))?;
         let stream = Async::<std::net::TcpStream>::connect(addr).await?;
 
         // Optionally add TLS based on the scheme
-        let stream: Box<dyn AsyncConn> = if scheme == "https" || scheme == "wss" {
+        let stream: Box<dyn AsyncConnection> = if scheme == "https" || scheme == "wss" {
             let tls_connector = TlsConnector::new();
             Box::new(tls_connector.connect(&host, stream).await?)
         } else {
@@ -41,7 +39,7 @@ impl HttpClient {
     }
 
     // Public method to send an HTTP request and return the HTTP response
-    pub async fn send<Req, Res>(stream: &mut Box<dyn AsyncConn>, request: &Request<Req>) -> Result<Response<Res>>
+    pub async fn send<Req, Res>(stream: &mut Box<dyn AsyncConnection>, request: &Request<Req>) -> anyhow::Result<Response<Res>>
     where
         Req: std::fmt::Debug + PartialEq<()>,
         Res: std::fmt::Debug + Sized + std::convert::From<String>,
@@ -88,10 +86,10 @@ impl HttpClient {
     }
 
     // Extracts the scheme, host, and port from the request URI
-    fn extract_host_from_request<Req>(req: &Request<Req>) -> Result<(String, String, u16)> {
+    fn extract_host_from_request<Req>(req: &Request<Req>) -> anyhow::Result<(String, String, u16)> {
         let uri = req.uri();
-        let authority = uri.authority().ok_or("No authority found in URI")?;
-        let scheme = uri.scheme_str().ok_or("No scheme found in URI")?;
+        let authority = uri.authority().ok_or(anyhow::anyhow!("No authority found in URI"))?;
+        let scheme = uri.scheme_str().ok_or(anyhow::anyhow!("No scheme found in URI"))?;
 
         let host = authority.host();
         let port = authority.port_u16().unwrap_or_else(|| match scheme {
@@ -103,14 +101,14 @@ impl HttpClient {
         });
 
         if port == 0 {
-            return Err("Unsupported URL scheme".into());
+            return Err(anyhow::anyhow!("Unsupported URL scheme"));
         }
 
         Ok((scheme.to_string(), host.to_string(), port))
     }
 
     // Serializes the HTTP request into a string format that can be sent over the network
-    fn serialize_http_request<Req>(req: &Request<Req>) -> Result<String> {
+    fn serialize_http_request<Req>(req: &Request<Req>) -> anyhow::Result<String> {
         let method = req.method();
         let uri = req.uri();
 
@@ -136,7 +134,7 @@ impl HttpClient {
     }
 
     // Reads the response status line from the stream
-    async fn read_response_status_line<S>(reader: &mut BufReader<S>) -> Result<String>
+    async fn read_response_status_line<S>(reader: &mut BufReader<S>) -> anyhow::Result<String>
     where
         S: AsyncRead + Unpin,
     {
@@ -146,18 +144,18 @@ impl HttpClient {
     }
 
     // Parses the response status line into a version and status code
-    fn parse_response_status_line(response_status_line: &str) -> Result<(Version, StatusCode)> {
+    fn parse_response_status_line(response_status_line: &str) -> anyhow::Result<(Version, StatusCode)> {
         let response_status_line_parts: Vec<&str> =
             response_status_line.split_whitespace().collect();
         if response_status_line_parts.len() < 2 {
-            return Err("Failed to parse response status line".into());
+            return Err(anyhow::anyhow!("Failed to parse response status line"));
         }
 
         let response_version = match response_status_line_parts[0] {
             "HTTP/1.0" => Version::HTTP_10,
             "HTTP/1.1" => Version::HTTP_11,
             "HTTP/2.0" => Version::HTTP_2,
-            _ => return Err("Unsupported HTTP version".into()),
+            _ => return Err(anyhow::anyhow!("Unsupported HTTP version")),
         };
 
         let response_status = StatusCode::from_u16(response_status_line_parts[1].parse()?)?;
@@ -165,7 +163,7 @@ impl HttpClient {
     }
 
     // Reads the response headers from the provided BufReader
-    async fn read_response_headers<S>(reader: &mut BufReader<S>) -> Result<HeaderMap<HeaderValue>>
+    async fn read_response_headers<S>(reader: &mut BufReader<S>) -> anyhow::Result<HeaderMap<HeaderValue>>
     where
         S: AsyncRead + Unpin,
     {
@@ -189,7 +187,7 @@ impl HttpClient {
     }
 
     // Reads a chunked HTTP body from the provided BufReader
-    async fn read_chunked_body<S>(reader: &mut BufReader<S>) -> Result<Vec<u8>>
+    async fn read_chunked_body<S>(reader: &mut BufReader<S>) -> anyhow::Result<Vec<u8>>
     where
         S: AsyncRead + Unpin,
     {
@@ -211,7 +209,7 @@ impl HttpClient {
             let mut crlf = [0; 2];
             reader.read_exact(&mut crlf).await?;
             if &crlf != b"\r\n" {
-                return Err("Invalid chunked encoding: missing CRLF".into());
+                return Err(anyhow::anyhow!("Invalid chunked encoding: missing CRLF"));
             }
             chunk_size_line.clear();
         }
@@ -223,7 +221,7 @@ impl HttpClient {
     async fn read_response_body<S>(
         reader: &mut BufReader<S>,
         headers: &HeaderMap<HeaderValue>,
-    ) -> Result<Vec<u8>>
+    ) -> anyhow::Result<Vec<u8>>
     where
         S: AsyncRead + Unpin,
     {
