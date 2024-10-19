@@ -15,6 +15,8 @@ log = "0.4.20"
 async-tls = "0.13.0"
 # error handling
 simple_error = { path = "../simple_error" }
+# json
+miniserde = "0.1.40"
 
 [dev-dependencies]
 # logging
