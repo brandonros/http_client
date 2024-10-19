@@ -5,7 +5,7 @@ use async_io::Async;
 use async_tls::TlsConnector;
 use http::{HeaderMap, HeaderName, HeaderValue, Request, Response, StatusCode, Version};
 use futures_lite::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
-use simple_error::SimpleResult;
+use simple_error::{box_err, SimpleResult};
 
 pub trait AsyncConnection: AsyncRead + AsyncWrite + Send + Sync + Unpin {}
 
@@ -102,7 +102,7 @@ impl HttpClient {
         });
 
         if port == 0 {
-            return Err("Unsupported URL scheme".into());
+            return Err(box_err!("Unsupported URL scheme"));
         }
 
         Ok((scheme.to_string(), host.to_string(), port))
@@ -149,14 +149,14 @@ impl HttpClient {
         let response_status_line_parts: Vec<&str> =
             response_status_line.split_whitespace().collect();
         if response_status_line_parts.len() < 2 {
-            return Err("Failed to parse response status line".into());
+            return Err(box_err!("Failed to parse response status line"));
         }
 
         let response_version = match response_status_line_parts[0] {
             "HTTP/1.0" => Version::HTTP_10,
             "HTTP/1.1" => Version::HTTP_11,
             "HTTP/2.0" => Version::HTTP_2,
-            _ => return Err("Unsupported HTTP version".into()),
+            _ => return Err(box_err!("Unsupported HTTP version")),
         };
 
         let response_status = StatusCode::from_u16(response_status_line_parts[1].parse()?)?;
@@ -210,7 +210,7 @@ impl HttpClient {
             let mut crlf = [0; 2];
             reader.read_exact(&mut crlf).await?;
             if &crlf != b"\r\n" {
-                return Err("Invalid chunked encoding: missing CRLF".into());
+                return Err(box_err!("Invalid chunked encoding: missing CRLF"));
             }
             chunk_size_line.clear();
         }
