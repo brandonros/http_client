@@ -1,6 +1,7 @@
 use futures_lite::future;
 use http::{Request, Uri};
 use http_client::HttpClient;
+
 fn main() {
     future::block_on(async {
         // init logging
@@ -15,12 +16,14 @@ fn main() {
             .uri(uri)
             .header("User-Agent", "http_client/1.0")
             .header("Host", "www.google.com")
-            .body(())
+            .body(vec![])
             .expect("Failed to build request");
 
         // Get the response
         let mut stream = HttpClient::connect(&request).await.expect("connect failed");
-        let response = HttpClient::send::<(), String>(&mut stream, &request).await.expect("request failed");
+        let response = HttpClient::send(&mut stream, &request).await.expect("request failed");
+        let response_body = String::from_utf8(response.body().clone()).expect("failed to parse response body");
         log::info!("response = {response:?}");
+        log::info!("response_body = {response_body}");
     })
 }

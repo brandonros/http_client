@@ -7,6 +7,9 @@ use http::{HeaderMap, HeaderName, HeaderValue, Request, Response, StatusCode, Ve
 use futures_lite::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use simple_error::{box_err, SimpleResult};
 
+type RequestBody = Vec<u8>;
+type ResponseBody = Vec<u8>;
+
 pub trait AsyncConnection: AsyncRead + AsyncWrite + Send + Sync + Unpin {}
 
 impl<T: AsyncRead + AsyncWrite + Send + Sync + Unpin> AsyncConnection for T {}
@@ -14,10 +17,7 @@ impl<T: AsyncRead + AsyncWrite + Send + Sync + Unpin> AsyncConnection for T {}
 pub struct HttpClient;
 
 impl HttpClient {
-    pub async fn connect<Req>(request: &Request<Req>) -> SimpleResult<Box<dyn AsyncConnection>>
-    where
-        Req: std::fmt::Debug + PartialEq<()> 
-    {
+    pub async fn connect(request: &Request<RequestBody>) -> SimpleResult<Box<dyn AsyncConnection>> {
         log::debug!("request = {request:?}");
 
         // Extract the scheme, host, and port from the request
@@ -40,11 +40,7 @@ impl HttpClient {
     }
 
     // Public method to send an HTTP request and return the HTTP response
-    pub async fn send<Req, Res>(stream: &mut Box<dyn AsyncConnection>, request: &Request<Req>) -> SimpleResult<Response<Res>>
-    where
-        Req: std::fmt::Debug + PartialEq<()>,
-        Res: std::fmt::Debug + Sized + std::convert::From<String>,
-    {
+    pub async fn send(stream: &mut Box<dyn AsyncConnection>, request: &Request<RequestBody>) -> SimpleResult<Response<ResponseBody>> {
         // Write the HTTP request to the stream
         let serialized_request = Self::serialize_http_request(request)?;
         log::debug!("serialized_request = {serialized_request}");
@@ -52,9 +48,9 @@ impl HttpClient {
         stream.flush().await?;
 
         // Write request body if there is one
-        let request_body = request.body();
-        if *request_body != () {
-            todo!() // Handle non-empty request body
+        if request.body().len() > 0 {
+            stream.write_all(request.body()).await?;
+            stream.flush().await?;
         }
 
         // Read and parse the response
@@ -67,14 +63,11 @@ impl HttpClient {
         let response_body = Self::read_response_body(&mut reader, &response_headers).await?;
         log::debug!("response_body = {response_body:02x?}");
 
-        // Convert the response body Vec<u8> to a string
-        let response_body_str = String::from_utf8(response_body)?;
-
         // Convert to HTTP crate response
-        let mut response: Response<Res> = Response::builder()
+        let mut response: Response<ResponseBody> = Response::builder()
             .status(response_status)
             .version(response_version)
-            .body(response_body_str.into())?;
+            .body(response_body)?;
 
         // Copy response headers to response
         *response.headers_mut() = response_headers;
@@ -87,7 +80,7 @@ impl HttpClient {
     }
 
     // Extracts the scheme, host, and port from the request URI
-    fn extract_host_from_request<Req>(req: &Request<Req>) -> SimpleResult<(String, String, u16)> {
+    fn extract_host_from_request(req: &Request<RequestBody>) -> SimpleResult<(String, String, u16)> {
         let uri = req.uri();
         let authority = uri.authority().ok_or("No authority found in URI")?;
         let scheme = uri.scheme_str().ok_or("No scheme found in URI")?;
@@ -109,7 +102,7 @@ impl HttpClient {
     }
 
     // Serializes the HTTP request into a string format that can be sent over the network
-    fn serialize_http_request<Req>(req: &Request<Req>) -> SimpleResult<String> {
+    fn serialize_http_request(req: &Request<RequestBody>) -> SimpleResult<String> {
         let method = req.method();
         let uri = req.uri();
 
