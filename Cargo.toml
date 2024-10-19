@@ -14,7 +14,7 @@ log = "0.4.20"
 # tls
 async-tls = "0.13.0"
 # error handling
-anyhow = "1.0.89"
+simple_error = { path = "../simple_error" }
 
 [dev-dependencies]
 # logging
