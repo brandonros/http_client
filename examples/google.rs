@@ -20,8 +20,8 @@ fn main() {
             .expect("Failed to build request");
 
         // Get the response
-        let mut stream = HttpClient::connect(&request).await.expect("connect failed");
-        let response = HttpClient::send(&mut stream, &request).await.expect("request failed");
+        let mut stream = HttpClient::create_connection(&request).await.expect("connect failed");
+        let response = HttpClient::request(&mut stream, &request).await.expect("request failed");
         let response_body = String::from_utf8(response.body().clone()).expect("failed to parse response body");
         log::info!("response = {response:?}");
         log::info!("response_body = {response_body}");
