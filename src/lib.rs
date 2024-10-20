@@ -1,11 +1,13 @@
-use connections::{AsyncConnection, AsyncHttpConnection};
+mod async_connection_factory;
+mod async_connection;
+mod request;
+mod response;
+
+use async_connection::AsyncConnection;
+use async_connection_factory::AsyncConnectionFactory;
 use futures_lite::{io::BufReader, AsyncWriteExt};
 use http::{Request, Response, Uri};
 use simple_error::SimpleResult;
-
-mod connections;
-mod request;
-mod response;
 
 type RequestBody = Vec<u8>;
 type ResponseBody = Vec<u8>;
@@ -14,7 +16,7 @@ pub struct HttpClient;
 
 impl HttpClient {
     pub async fn create_connection<T: std::fmt::Debug>(request: &Request<T>) -> SimpleResult<Box<dyn AsyncConnection>> {
-        AsyncHttpConnection::connect(&request).await
+        AsyncConnectionFactory::connect(&request).await
     }
 
     // Public method to send an HTTP request and return the HTTP response
@@ -74,7 +76,7 @@ impl HttpClient {
             .body(request_body_bytes)?;
 
         // make request
-        let mut stream = AsyncHttpConnection::connect(&request).await?;
+        let mut stream = AsyncConnectionFactory::connect(&request).await?;
         let response = Self::request(&mut stream, &request).await?;
 
         // parse response

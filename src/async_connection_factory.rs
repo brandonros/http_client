@@ -3,16 +3,13 @@ use std::net::ToSocketAddrs;
 use async_io::Async;
 use async_tls::TlsConnector;
 use http::Request;
-use futures_lite::{AsyncRead, AsyncWrite};
 use simple_error::{box_err, SimpleResult};
 
-pub trait AsyncConnection: AsyncRead + AsyncWrite + Send + Sync + Unpin {}
+use crate::async_connection::AsyncConnection;
 
-impl<T: AsyncRead + AsyncWrite + Send + Sync + Unpin> AsyncConnection for T {}
+pub struct AsyncConnectionFactory;
 
-pub struct AsyncHttpConnection;
-
-impl AsyncHttpConnection {
+impl AsyncConnectionFactory {
     // Extracts the scheme, host, and port from the request URI
     fn extract_host_from_request<T>(req: &Request<T>) -> SimpleResult<(String, String, u16)> {
         let uri = req.uri();
