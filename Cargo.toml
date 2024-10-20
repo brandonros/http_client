@@ -14,7 +14,7 @@ log = "0.4.20"
 # tls
 async-tls = "0.13.0"
 # error handling
-simple_error = { path = "../simple_error" }
+simple_error = { git = "https://github.com/brandonros/simple_error.git" }
 # json
 miniserde = "0.1.40"
 
