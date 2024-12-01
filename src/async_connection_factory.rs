@@ -1,5 +1,6 @@
 use std::net::ToSocketAddrs;
 
+use alloc::{boxed::Box, string::{String, ToString}};
 use async_io::Async;
 use async_tls::TlsConnector;
 use http::Request;
@@ -32,12 +33,12 @@ impl AsyncConnectionFactory {
         Ok((scheme.to_string(), host.to_string(), port))
     }
 
-    pub async fn connect<T: std::fmt::Debug>(request: &Request<T>) -> SimpleResult<Box<dyn AsyncConnection>> {
+    pub async fn connect<T: core::fmt::Debug>(request: &Request<T>) -> SimpleResult<Box<dyn AsyncConnection>> {
         log::debug!("request = {request:?}");
 
         // Extract the scheme, host, and port from the request
         let (scheme, host, port) = Self::extract_host_from_request(request)?;
-        let addr = format!("{host}:{port}")
+        let addr = alloc::format!("{host}:{port}")
             .to_socket_addrs()?
             .next()
             .ok_or("Failed to resolve host")?;

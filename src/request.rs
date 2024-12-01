@@ -1,3 +1,4 @@
+use alloc::string::String;
 use http::{Request, Version};
 use simple_error::SimpleResult;
 
@@ -16,10 +17,10 @@ pub fn serialize_http_request<T>(req: &Request<T>) -> SimpleResult<String> {
         _ => "HTTP/1.1",
     };
 
-    let mut request_line = format!("{method} {path_and_query} {version}\r\n");
+    let mut request_line = alloc::format!("{method} {path_and_query} {version}\r\n");
 
     for (name, value) in req.headers() {
-        request_line.push_str(&format!("{}: {}\r\n", name.as_str(), value.to_str()?));
+        request_line.push_str(&alloc::format!("{}: {}\r\n", name.as_str(), value.to_str()?));
     }
 
     request_line.push_str("\r\n");

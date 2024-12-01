@@ -1,5 +1,6 @@
-use std::str::FromStr;
+use core::str::FromStr;
 
+use alloc::{string::String, vec::Vec};
 use futures_lite::{io::BufReader, AsyncBufReadExt, AsyncRead, AsyncReadExt};
 use http::{HeaderMap, HeaderName, HeaderValue, StatusCode, Version};
 use simple_error::{box_err, SimpleResult};
@@ -73,7 +74,7 @@ where
             break;
         }
 
-        let mut chunk = vec![0; chunk_size];
+        let mut chunk = alloc::vec![0; chunk_size];
         reader.read_exact(&mut chunk).await?;
         body.extend_from_slice(&chunk);
 
@@ -98,7 +99,7 @@ where
 {
     if let Some(content_length_value) = headers.get("content-length") {
         let content_length = content_length_value.to_str()?.parse::<usize>()?;
-        let mut response_body = vec![0u8; content_length];
+        let mut response_body = alloc::vec![0u8; content_length];
         reader.read_exact(&mut response_body).await?;
         Ok(response_body)
     } else if let Some(transfer_encoding) = headers.get("transfer-encoding") {
@@ -109,7 +110,7 @@ where
         }
     } else if let Some(connection) = headers.get("connection") {
         if connection == "upgrade" || connection == "Upgrade" {
-            Ok(vec![]) // assume empty response body on websocket upgrade
+            Ok(alloc::vec![]) // assume empty response body on websocket upgrade
         } else {
             todo!()
         }

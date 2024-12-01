@@ -1,8 +1,13 @@
+#![no_std]
+
+extern crate alloc;
+
 mod async_connection_factory;
 mod async_connection;
 mod request;
 mod response;
 
+use alloc::{boxed::Box, string::String, vec::Vec};
 use async_connection::AsyncConnection;
 use async_connection_factory::AsyncConnectionFactory;
 use futures_lite::{io::BufReader, AsyncWriteExt};
@@ -15,7 +20,7 @@ type ResponseBody = Vec<u8>;
 pub struct HttpClient;
 
 impl HttpClient {
-    pub async fn create_connection<T: std::fmt::Debug>(request: &Request<T>) -> SimpleResult<Box<dyn AsyncConnection>> {
+    pub async fn create_connection<T: core::fmt::Debug>(request: &Request<T>) -> SimpleResult<Box<dyn AsyncConnection>> {
         AsyncConnectionFactory::connect(&request).await
     }
 
@@ -72,7 +77,7 @@ impl HttpClient {
             .method("POST")
             .uri(uri)
             .header("Content-Type", "application/json")
-            .header("Content-Length", format!("{}", stringified_request_body.len()))
+            .header("Content-Length", alloc::format!("{}", stringified_request_body.len()))
             .body(request_body_bytes)?;
 
         // make request
