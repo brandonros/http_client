@@ -1,12 +1,12 @@
 use std::net::ToSocketAddrs;
 
-use alloc::{boxed::Box, string::{String, ToString}};
+use alloc::string::{String, ToString};
 use async_io::Async;
 use async_tls::TlsConnector;
 use http::Request;
 use simple_error::{box_err, SimpleResult};
 
-use crate::async_connection::AsyncConnection;
+use crate::platform::AsyncConnection;
 
 pub struct AsyncConnectionFactory;
 

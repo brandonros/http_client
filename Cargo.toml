@@ -3,20 +3,39 @@ name = "http_client"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+std = [
+    "async-io",
+    "async-tls",
+    "futures-lite/std"
+]
+
 [dependencies]
-# async
-futures-lite = { version =  "2.3.0" }
-async-io = "2.3.4"
-# http
-http = "1.0.0"
-# logging
-log = "0.4.20"
-# tls
-async-tls = "0.13.0"
-# error handling
-simple_error = { git = "https://github.com/brandonros/simple_error.git" }
-# json
-miniserde = "0.1.40"
+# Common dependencies
+futures-lite = { version = "2.3.0", default-features = false }
+http = { path = "../http", default-features = false }
+log = { version = "0.4.20", default-features = false }
+simple_error = { path = "../simple_error" }
+miniserde = { version = "0.1.40", default-features = false }
+
+# std-specific dependencies
+async-io = { version = "2.3.4", optional = true }
+async-tls = { version = "0.13.0", optional = true }
+
+# wasm-specific dependencies
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Request",
+    "RequestInit",
+    "RequestMode",
+    "Response",
+    "Headers",
+]}
+js-sys = "0.3"
 
 [dev-dependencies]
 # logging
