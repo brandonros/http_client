@@ -100,22 +100,30 @@ where
         let content_length = content_length_value.to_str()?.parse::<usize>()?;
         let mut response_body = vec![0u8; content_length];
         reader.read_exact(&mut response_body).await?;
-        Ok(response_body)
-    } else if let Some(transfer_encoding) = headers.get("transfer-encoding") {
+        return Ok(response_body);
+    }  
+    
+    if let Some(transfer_encoding) = headers.get("transfer-encoding") {
         if transfer_encoding == "chunked" {
-            read_chunked_body(reader).await
-        } else {
-            todo!() // Handle other transfer encodings if needed
-        }
-    } else if let Some(connection) = headers.get("connection") {
-        if connection == "upgrade" || connection == "Upgrade" {
-            Ok(vec![]) // assume empty response body on websocket upgrade
+            return read_chunked_body(reader).await;
         } else {
             todo!()
         }
-    } else {
-        let mut response_body = Vec::with_capacity(8 * 1024 * 1024);
-        let num_bytes_read = reader.read_to_end(&mut response_body).await?;
-        Ok(response_body[0..num_bytes_read].to_vec())
+    }  
+    
+    if let Some(connection) = headers.get("connection") {
+        if connection == "upgrade" || connection == "Upgrade" {
+            Ok(vec![]) // assume empty response body on websocket upgrade
+        } else if connection == "keep-alive" {
+            // do nothing?
+        } else if connection == "close" {
+            // do nothing?
+        } else {
+            todo!()
+        }
     }
+
+    let mut response_body = Vec::with_capacity(8 * 1024 * 1024);
+    let num_bytes_read = reader.read_to_end(&mut response_body).await?;
+    Ok(response_body[0..num_bytes_read].to_vec())
 }
