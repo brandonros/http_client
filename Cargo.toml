@@ -23,3 +23,4 @@ miniserde = "0.1.40"
 env_logger = "0.11.5"
 # async runtime
 smol = { git = "https://github.com/brandonros/smol.git", rev = "e593cac01d2ee4a1241b8c292f61b8a6d800bb08" }
+async-executor = { git = "https://github.com/smol-rs/async-executor.git", rev = "929dc5057f09a5a09ecbdebd9f73186aa5395a3e", features = ["main_executor"] }

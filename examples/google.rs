@@ -1,11 +1,12 @@
 use std::sync::Arc;
 
-use http::{Method, Request, Response, StatusCode, Version};
 use async_executor::Executor;
+use http::{Request, Uri};
+use http_client::HttpClient;
 use simple_error::SimpleResult;
 use smol::MainExecutor;
 
-async fn async_main(executor: Arc<Executor<'static>>) -> SimpleResult<()> {
+async fn async_main(_executor: Arc<Executor<'static>>) -> SimpleResult<()> {
     // init logging
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
 
@@ -27,6 +28,8 @@ async fn async_main(executor: Arc<Executor<'static>>) -> SimpleResult<()> {
     let response_body = String::from_utf8(response.body().clone()).expect("failed to parse response body");
     log::info!("response = {response:?}");
     log::info!("response_body = {response_body}");
+
+    Ok(())
 }
 
 fn main() -> SimpleResult<()> {
