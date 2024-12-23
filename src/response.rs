@@ -123,7 +123,12 @@ where
         }
     }
 
-    let mut response_body = Vec::with_capacity(8 * 1024 * 1024);
-    let num_bytes_read = reader.read_to_end(&mut response_body).await?;
-    Ok(response_body[0..num_bytes_read].to_vec())
+    if let Some(content_length) = headers.get("content-length") {
+        let content_length = content_length.to_str()?.parse::<usize>()?;
+        let mut response_body = vec![0u8; content_length];
+        reader.read_exact(&mut response_body).await?;
+        return Ok(response_body);
+    }
+
+    todo!()
 }
