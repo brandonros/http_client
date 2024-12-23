@@ -40,7 +40,7 @@ impl HttpClient {
         let (response_version, response_status) = response::parse_response_status_line(&response_status_line)?;
         let response_headers = response::read_response_headers(&mut reader).await?;
         log::debug!("response_headers = {response_headers:?}");
-        let response_body = if response_status == StatusCode::NO_CONTENT {
+        let response_body = if response_status == StatusCode::NO_CONTENT || response_status == StatusCode::NOT_MODIFIED {
             vec![]
         } else {
             response::read_response_body(&mut reader, &response_headers).await?
