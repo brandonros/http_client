@@ -6,7 +6,7 @@ mod response;
 use async_connection::AsyncConnection;
 use async_connection_factory::AsyncConnectionFactory;
 use futures_lite::{io::BufReader, AsyncWriteExt};
-use http::{Request, Response, Uri};
+use http::{Request, Response, StatusCode, Uri};
 use simple_error::SimpleResult;
 
 type RequestBody = Vec<u8>;
@@ -40,7 +40,11 @@ impl HttpClient {
         let (response_version, response_status) = response::parse_response_status_line(&response_status_line)?;
         let response_headers = response::read_response_headers(&mut reader).await?;
         log::debug!("response_headers = {response_headers:?}");
-        let response_body = response::read_response_body(&mut reader, &response_headers).await?;
+        let response_body = if response_status == StatusCode::NO_CONTENT {
+            vec![]
+        } else {
+            response::read_response_body(&mut reader, &response_headers).await?
+        };
         log::debug!("response_body = {response_body:02x?}");
 
         // Convert to HTTP crate response
