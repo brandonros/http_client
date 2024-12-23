@@ -53,7 +53,7 @@ impl HttpClient {
         *response.headers_mut() = response_headers;
 
         // log
-        log::debug!("response = {response:?}");
+        log::debug!("response = {response:02x?}");
 
         // return
         Ok(response)
