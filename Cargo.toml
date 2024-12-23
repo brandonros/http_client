@@ -21,3 +21,5 @@ miniserde = "0.1.40"
 [dev-dependencies]
 # logging
 env_logger = "0.11.5"
+# async runtime
+smol = { git = "https://github.com/brandonros/smol.git", rev = "e593cac01d2ee4a1241b8c292f61b8a6d800bb08" }
