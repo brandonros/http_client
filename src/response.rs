@@ -113,7 +113,7 @@ where
     
     if let Some(connection) = headers.get("connection") {
         if connection == "upgrade" || connection == "Upgrade" {
-            Ok(vec![]) // assume empty response body on websocket upgrade
+            return Ok(vec![]); // assume empty response body on websocket upgrade
         } else if connection == "keep-alive" {
             // do nothing?
         } else if connection == "close" {
