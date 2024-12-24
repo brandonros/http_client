@@ -33,7 +33,7 @@ impl AsyncConnectionFactory {
     }
 
     pub async fn connect<T: std::fmt::Debug>(request: &Request<T>) -> SimpleResult<Box<dyn AsyncConnection>> {
-        log::debug!("request = {request:?}");
+        log::debug!("request = {request:02x?}");
 
         // Extract the scheme, host, and port from the request
         let (scheme, host, port) = Self::extract_host_from_request(request)?;
