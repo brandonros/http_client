@@ -70,11 +70,13 @@ impl HttpClient {
     {
         // build request
         let uri: Uri = url.parse()?;
+        let host = uri.host().unwrap_or("").to_string();
         let stringified_request_body = miniserde::json::to_string(&request_body);
         let request_body_bytes = stringified_request_body.as_bytes().to_vec();
         let request = Request::builder()
             .method("POST")
             .uri(uri)
+            .header("Host", host)
             .header("Content-Type", "application/json")
             .header("Content-Length", format!("{}", stringified_request_body.len()))
             .body(request_body_bytes)?;
